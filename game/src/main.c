@@ -2,90 +2,183 @@
 #include "mathf.h"
 #include "raylib.h"
 #include "raymath.h"
+#include "integrator.h"
 #include "world.h"
+#include "force.h"
+#include "render.h"
+#include "editor.h"
+#include "spring.h"
+#include "collision.h"
+#include "contact.h"
 
 #include <stdlib.h>
 #include <assert.h>
+#include <stdio.h>
 
-#define MAX_BODIES 10
+int main(void) {
+	ncBody* selectedBody = NULL;
+	ncBody* connectBody = NULL;
 
-int main(void)
-{
 	InitWindow(1280, 720, "Physics Engine");
-	SetTargetFPS(120);
+	InitEditor();
+	SetTargetFPS(60);
 
-	////Body* bodies = new Body[20];
-	//Body* bodies = (Body*)malloc(sizeof(Body) * MAX_BODIES);
-	//assert(bodies);
-
-
-	//int bodyCount = 0;
-
-	//game loop
-	while (!WindowShouldClose())
-	{
-		////update
+	while (!WindowShouldClose()) {
+		//update
 		float dt = GetFrameTime();
 		float fps = (float)GetFPS();
 
+		//initialize world
+		ncGravity = (Vector2){ 0, ncEditorData.GravityValue };
+
 		Vector2 position = GetMousePosition();
-		//if (IsMouseButtonDown(0)) {
-		//	bodies[bodyCount].position = position;
-		//	bodies[bodyCount].velocity = CreateVector2(GetRandomFloatValue(-5, 5), GetRandomFloatValue(-5, 5));
-		//	bodyCount++;
-		//}
+		ncScreenZoom -= GetMouseWheelMove() * 0.2f;
+		ncScreenZoom = Clamp(ncScreenZoom, 0.1f, 10);
 
-		////render/draw (render is just a fancy word for draw)
-		//BeginDrawing();
-		//ClearBackground(BLACK);
-		////stats
-		//DrawText(TextFormat("FPS: %.2f (ms %.2fms)", fps, 1000 / fps), 10, 10, 20, LIME);
-		//DrawText(TextFormat("FRAME: %.4f", dt), 10, 30, 20, LIME);
+		UpdateEditor(position);
 
-		//DrawCircle((int)position.x, (int)position.y, 20, DARKGREEN);
-		//for (int i = 0; i < bodyCount; i++) {
-		//	bodies[i].position = Vector2Add(bodies[i].position, bodies[i].velocity);
-		//	DrawCircle((int)bodies[i].position.x, (int)bodies[i].position.y, 10, RED);
-		//}
+		selectedBody = GetBodyIntersect(ncBodies, position);
+		if (selectedBody) {
+			Vector2 screen = ConvertWorldToScreen(selectedBody->position);
+			DrawCircleLines((int)screen.x, (int)screen.y, ConvertWorldToPixel(selectedBody->mass * 0.5f) + 5, YELLOW);
+		}
 
-		//EndDrawing();
+		if (!ncEditorIntersect) {
+			//create body
+			if ((IsMouseButtonPressed(0) || (IsMouseButtonDown(0) && IsKeyDown(KEY_LEFT_CONTROL)))) {
+				ncBody* body = CreateBody(ConvertScreenToWorld(position), ncEditorData.MassValue, ncEditorData.BodyTypeActive);
+				body->damping = ncEditorData.DampingValue;
+				body->gravityScale = ncEditorData.GravityScaleValue;
+				body->color = WHITE;//ColorFromHSV( GetRandomFloatValue(0, 360), 1, 1);
+				body->restitution = 0.8f;
 
-		/*
-		* The code in main() should only use the CreateBody when the mouse is clicked and the bodies list when updating and drawing them.
-		* Because the bodies are in a linked list instead of an array (next to each other in memory),
-		* they will need to be updated/drawn in a different type of loop than the for loop in class. They will require a while loop.
-		*/
+				//ApplyForce(body, (Vector2){GetRandomFloatValue(-200, 200), GetRandomFloatValue(-200, 200) }, FM_VELOCITY);
+				AddBody(body);
+			}
 
-		if (IsMouseButtonDown(0))
-		{
-			Body* body = CreateBody();
+			//connect springs
+			if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && selectedBody) connectBody = selectedBody;
+			if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && connectBody) DrawLineBodyToPosition(connectBody, position);
+			if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT) && connectBody) {
+				if (selectedBody && selectedBody != connectBody) {
+					ncSpring_t* spring = CreateSpring(connectBody, selectedBody, Vector2Distance(connectBody->position, selectedBody->position), 20);
+					AddSpring(spring);
+				}
+			}
+		}
+
+		/*if ((IsMouseButtonDown(0)) && IsKeyDown(KEY_X)) {
+			ncBody* body = CreateBody();
 			body->position = position;
-			body->velocity = CreateVector2(GetRandomFloatValue(-5, 5), GetRandomFloatValue(-5, 5));
-		};
+			body->mass = GetRandomFloatValue(3, 10);
+			body->inverseMass = 1 / body->mass;
+			body->type = BT_DYNAMIC;
+			body->damping = 2.1f;
+			body->gravityScale = 10;
+			body->color = ColorFromHSV(GetRandomFloatValue(0, 360), 1, 1);
 
+			Vector2 force = Vector2Scale(GetVector2FromAngle(GetRandomFloatValue(0, 360) * DEG2RAD), GetRandomFloatValue(1000, 2000));
+
+			ApplyForce(body, force, FM_IMPULSE);
+		}
+
+		if ((IsMouseButtonDown(0)) && IsKeyDown(KEY_C)) {
+			ncBody* body = CreateBody();
+			body->position = position;
+			body->mass = GetRandomFloatValue(3, 10);
+			body->inverseMass = 1 / body->mass;
+			body->type = BT_DYNAMIC;
+			body->damping = 2.1f;
+			body->gravityScale = 10;
+			body->color = ColorFromHSV(GetRandomFloatValue(0, 360), 1, 1);
+
+			float angle = GetRandomFloatValue(250, 280);
+			Vector2 force = Vector2Scale(GetVector2FromAngle((angle + GetRandomFloatValue(-30, 30)) * DEG2RAD), GetRandomFloatValue(1000, 5000));
+			ApplyForce(body, force, FM_IMPULSE);
+		}
+
+		if ((IsMouseButtonDown(0)) && IsKeyDown(KEY_V)) {
+			ncBody* body = CreateBody();
+			body->position = Vector2Subtract(position, (Vector2){ 0, 60 });
+			body->mass = GetRandomFloatValue(3, 10);
+			body->inverseMass = 1 / body->mass;
+			body->type = BT_DYNAMIC;
+			body->damping = 2.1f;
+			body->gravityScale = 10;
+			body->color = ColorFromHSV(GetRandomFloatValue(0, 360), 1, 1);
+			Vector2 force = Vector2Scale(GetVector2FromAngle(GetRandomFloatValue(0, 360) * DEG2RAD), GetRandomFloatValue(10, 20));
+			ApplyForce(body, force, FM_VELOCITY);
+
+			ncBody* body1 = CreateBody();
+			body1->position = Vector2Subtract(position, (Vector2) { 60, -60 });
+			body1->mass = GetRandomFloatValue(3, 10);
+			body1->inverseMass = 1 / body1->mass;
+			body1->type = BT_DYNAMIC;
+			body1->damping = 2.1f;
+			body1->gravityScale = 10;
+			body1->color = ColorFromHSV(GetRandomFloatValue(0, 360), 1, 1);
+			ApplyForce(body1, force, FM_VELOCITY);
+
+			ncBody* body2 = CreateBody();
+			body2->position = Vector2Subtract(position, (Vector2) { -60, -60 });
+			body2->mass = GetRandomFloatValue(3, 10);
+			body2->inverseMass = 1 / body2->mass;
+			body2->type = BT_DYNAMIC;
+			body2->damping = 2.1f;
+			body2->gravityScale = 10;
+			body2->color = ColorFromHSV(GetRandomFloatValue(0, 360), 1, 1);
+			ApplyForce(body2, force, FM_VELOCITY);
+		}*/
+
+		//apply force
+		ApplyGravity(ncBodies, ncEditorData.GravitationValue);
+		ApplySpringForce(ncSprings);
+
+		//update bodies
+		for (ncBody* body = ncBodies; body; body = body->next) {
+			Step(body, dt);
+		}
+
+		//collision
+		ncContact_t* contacts = NULL;
+		CreateContacts(ncBodies, &contacts);
+		SeparateContacts(contacts);
+		ResolveContacts(contacts);
+
+		//render
 		BeginDrawing();
 		ClearBackground(BLACK);
-		DrawCircle((int)position.x, (int)position.y, 20, DARKGREEN);
-		DrawText(TextFormat("FPS: %.2f (ms %.2fms)", fps, 1000 / fps), 10, 10, 20, LIME);
 
-		DrawText(TextFormat("FRAME: %.4f", dt), 10, 30, 20, LIME);
-		// update / draw bodies
-		Body* body = bodies;
-		while (body) // do while we have a valid pointer, will be NULL at the end of the list
-		{
-			// update body position
-			// draw body
-			body->position = Vector2Add(body->position, body->velocity);
-			DrawCircle((int)body->position.x, (int)body->position.y, 10, RED);
+		//stats
+		DrawText(TextFormat("FPS: %.2f (%.2fms)", fps, 1000 / fps), 10, 10, 20, LIME);
+		DrawText(TextFormat("Frame: %.4f", dt), 10, 30, 20, LIME);
 
-			body = body->next; // get next body
+		//draw bodies
+		for (ncBody* body = ncBodies; body; body = body->next) {
+			Vector2 screen = ConvertWorldToScreen(body->position);
+			DrawCircle((int)screen.x, (int)screen.y, ConvertWorldToPixel(body->mass * 0.5f), body->color);
 		}
+
+		//draw contacts
+		for (ncContact_t* contact = contacts; contact; contact = contact->next) {
+			Vector2 screen = ConvertWorldToScreen(contact->body1->position);
+			DrawCircle((int)screen.x, (int)screen.y, ConvertWorldToPixel(contact->body1->mass * 0.5f), BLUE);
+		}
+
+		//draw springs
+		for (ncSpring_t* spring = ncSprings; spring; spring = spring->next) {
+			Vector2 screen1 = ConvertWorldToScreen(spring->body1->position);
+			Vector2 screen2 = ConvertWorldToScreen(spring->body2->position);
+			DrawLine((int)screen1.x, (int)screen1.y, (int)screen2.x, (int)screen2.y, RED);
+		}
+
+		DrawEditor(position);
 
 		EndDrawing();
 	}
 
-
 	CloseWindow();
-	free(bodies); //free the memory (clean up after yourself!) In C++ this would be delete[] bodies;
+	free(ncBodies);
+
 	return 0;
 }
